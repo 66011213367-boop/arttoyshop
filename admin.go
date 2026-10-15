@@ -1,11 +1,45 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 )
+
+// uploadToCloudinary ฟังก์ชันรับไฟล์รูปภาพแล้วอัปโหลดขึ้น Cloudinary
+func uploadToCloudinary(fileHeader *multipart.FileHeader) (string, error) {
+	cld, err := cloudinary.NewFromParams(
+		os.Getenv("CLOUDINARY_CLOUD_NAME"),
+		os.Getenv("CLOUDINARY_API_KEY"),
+		os.Getenv("CLOUDINARY_API_SECRET"),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	ctx := context.Background()
+	uploadResult, err := cld.Upload.Upload(ctx, file, uploader.UploadParams{
+		Folder: "arttoys",
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return uploadResult.SecureURL, nil
+}
 
 func AdminHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -273,14 +307,19 @@ func AdminHandler(db *sql.DB) http.HandlerFunc {
 			<div class="grid-top">
 				<div class="card">
 					<h2>เพิ่มสินค้าใหม่</h2>
-					<form method="POST" action="/admin/add-product">
+					<form method="POST" action="/admin/add-product" enctype="multipart/form-data">
 						<div class="form-group"><label>ชื่อสินค้า</label><input type="text" name="name" placeholder="เช่น Hirono Little Mischief" required></div>
 						<div class="form-group"><label>รายละเอียด</label><textarea name="description" rows="2" placeholder="รายละเอียดสินค้า..."></textarea></div>
 						<div class="form-group"><label>ราคา (บาท)</label><input type="number" step="0.01" name="price" placeholder="550.00" required></div>
 						<div class="form-group"><label>จำนวนสต็อก</label><input type="number" name="stock" placeholder="10" required></div>
 						
 						<div class="form-group">
-							<label>เลือกพรีเซ็ต หรือระบุ URL / พาธรูปภาพ</label>
+							<label style="color:#0284c7;">☁️ อัปโหลดไฟล์รูปภาพ ( Cloudinary Storage)</label>
+							<input type="file" name="image_file" accept="image/*" style="padding:6px; border:1px solid #0096c7; background:#f0f9ff;">
+						</div>
+
+						<div class="form-group">
+							<label>หรือเลือกพรีเซ็ต / ระบุ URL รูปภาพ</label>
 							<select id="imgSelect" onchange="document.getElementById('imgUrlInput').value = this.value" style="margin-bottom:8px;">
 								<option value="/images/hirono.png">Hirono (.png)</option>
 								<option value="/images/hirono v.2.png">Hirono V.2 (.png)</option>
@@ -291,7 +330,7 @@ func AdminHandler(db *sql.DB) http.HandlerFunc {
 								<option value="/images/twinkletwinkle.png">Twinkle Twinkle (.png)</option>
 								<option value="/images/twinkletwinkle v.2.png">Twinkle Twinkle V.2 (.png)</option>
 							</select>
-							<input type="text" id="imgUrlInput" name="image_url" value="/images/hirono.png" placeholder="ระบุ /images/filename.png หรือ URL ออนไลน์" required>
+							<input type="text" id="imgUrlInput" name="image_url" value="/images/hirono.png" placeholder="ระบุ /images/filename.png หรือ URL ออนไลน์">
 						</div>
 
 						<button type="submit" class="btn-add">บันทึกสินค้า</button>
@@ -442,11 +481,24 @@ func AddProductHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if r.Method == http.MethodPost {
+			// อนุญาตให้อ่านข้อมูล multipart form (ขนาดไฟล์สูงสุด 10MB)
+			_ = r.ParseMultipartForm(10 << 20)
+
 			name := r.FormValue("name")
 			description := r.FormValue("description")
 			price, _ := strconv.ParseFloat(r.FormValue("price"), 64)
 			stock, _ := strconv.Atoi(r.FormValue("stock"))
 			imageURL := r.FormValue("image_url")
+
+			// ตรวจสอบว่ามีการอัปโหลดไฟล์รูปภาพผ่านฟอร์มหรือไม่
+			file, header, err := r.FormFile("image_file")
+			if err == nil {
+				file.Close()
+				cldURL, uploadErr := uploadToCloudinary(header)
+				if uploadErr == nil && cldURL != "" {
+					imageURL = cldURL // เปลี่ยนไปใช้ลิงก์ถาวรจาก Cloudinary
+				}
+			}
 
 			if imageURL == "" {
 				imageURL = "/images/labobu.png"
