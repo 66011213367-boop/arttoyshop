@@ -13,7 +13,7 @@ import (
 
 // ConnectDB ทำหน้าที่เชื่อมต่อฐานข้อมูล MySQL
 func ConnectDB() *sql.DB {
-	// อ่านค่า DSN จาก Environment Variable ของ Railway
+	// อ่านค่า DSN จาก Environment Variable ของ Railway/Render
 	dsn := os.Getenv("MYSQL_URL")
 	if dsn == "" {
 		// ค่าสำรองสำหรับรันบน เครื่อง Localhost
@@ -22,7 +22,9 @@ func ConnectDB() *sql.DB {
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		log.Fatalf("Error creating DB pool: %v", err)
+		//  แก้จาก log.Fatalf เป็น log.Printf เพื่อไม่ให้เซิร์ฟเวอร์ล่ม
+		log.Printf("Error creating DB pool: %v", err)
+		return db
 	}
 
 	db.SetMaxOpenConns(5)
@@ -31,7 +33,9 @@ func ConnectDB() *sql.DB {
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatalf("Cannot connect to MySQL: %v", err)
+		//  แก้จาก log.Fatalf เป็น log.Printf เพื่อให้เว็บรันต่อไปได้
+		log.Printf("Cannot connect to MySQL (Running without DB): %v", err)
+		return db
 	}
 
 	autoSetupDatabase(db)
