@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"html"
 	"net/http"
 
@@ -66,11 +67,12 @@ func RegisterProcessHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// 1. อ่านค่าจาก Form ให้ครบถ้วน
 		username := html.EscapeString(r.FormValue("username"))
 		email := html.EscapeString(r.FormValue("email"))
 		plainPassword := r.FormValue("password")
 
-		// 1. ตรวจสอบว่า Username ซ้ำหรือไม่
+		// 2. ตรวจสอบว่า Username ซ้ำหรือไม่
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count)
 		if err == nil && count > 0 {
@@ -83,20 +85,27 @@ func RegisterProcessHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 2. แปลงรหัสผ่านเป็น Hash ด้วย bcrypt
+		// 3. แปลงรหัสผ่านเป็น Hash ด้วย bcrypt
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.DefaultCost)
 		if err != nil {
-			http.Error(w, "Error hashing password", http.StatusInternalServerError)
+			http.Error(w, "Error hashing password: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// 3. บันทึกข้อมูลลง DB (เก็บรหัสผ่านเป็นค่า Hash)
+		// 4. บันทึกข้อมูลลงฐานข้อมูล MySQL
 		_, err = db.Exec("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, 'user')", username, email, string(hashedPassword))
 		if err != nil {
-			http.Error(w, "Database Error: "+err.Error(), http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			alertMsg := fmt.Sprintf("เกิดข้อผิดพลาดในการบันทึกข้อมูล: %s", err.Error())
+			_, _ = w.Write([]byte(fmt.Sprintf(`
+			<script>
+				alert('%s');
+				window.location.href = '/register';
+			</script>`, alertMsg)))
 			return
 		}
 
+		// 5. สมัครสำเร็จ แจ้งเตือนและนำไปหน้า Login
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`
 		<script>
